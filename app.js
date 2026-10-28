@@ -27,6 +27,7 @@ function setup(){
  $('csv').onclick=()=>download(false);$('xlsx').onclick=()=>download(true);
  $('add').onclick=addEmployee;
  $('manage').onclick=openExclusions;
+ $('showExcluded').onchange=render;
  $('closeExclusions').onclick=()=>$('exclusionDialog').close();
  $('exclusionForm').onsubmit=saveExclusion;
  $('exType').onchange=()=>{ $('exDate').value=$('exType').value==='year'?`${year}-01-01`:dateISO(year,month,1);};
@@ -63,17 +64,47 @@ async function loadRemote(){
   signedIn();render();
  }catch(e){$('appcontent').hidden=true;notify('Database loading failed: '+e.message+'. Check schema.sql, RLS policies and browser Console.',true);$('loginrequired').hidden=false;$('loginnotice').textContent='Signed in, but the database could not load. '+e.message;}
 }
-function visibleNames(){
- const search=$('search').value.trim().toLowerCase();
- const first=`${year}-01-01`,last=`${year}-12-31`;
- return employees.filter(e=>e.name.toLowerCase().includes(search) &&
-  (e.active || attendance.some(a=>a.employee===e.name&&a.date>=first&&a.date<=last))
- ).map(e=>e.name);
+// Hide a row only when the employee is excluded for EVERY day of the selected period.
+// A partial exclusion keeps the employee visible so earlier attendance remains accessible.
+function fullyExcludedForPeriod(name, monthly) {
+ const start = monthly ? dateISO(year, month, 1) : `${year}-01-01`;
+ const end = monthly
+  ? dateISO(year, month, new Date(year, month + 1, 0).getDate())
+  : `${year}-12-31`;
+ const ranges = exclusions
+  .filter(e => e.employee === name && e.start_date <= end && (!e.end_date || e.end_date >= start))
+  .map(e => ({start: e.start_date > start ? e.start_date : start,
+              end: e.end_date && e.end_date < end ? e.end_date : end}))
+  .sort((a,b) => a.start.localeCompare(b.start));
+ if (!ranges.length) return false;
+ let coveredUntil = null;
+ for (const range of ranges) {
+  const nextDay = coveredUntil ? nextISO(coveredUntil) : start;
+  if (range.start > nextDay) return false;
+  if (!coveredUntil || range.end > coveredUntil) coveredUntil = range.end;
+  if (coveredUntil >= end) return true;
+ }
+ return false;
+}
+function nextISO(date) {
+ const d = new Date(`${date}T12:00:00Z`);
+ d.setUTCDate(d.getUTCDate() + 1);
+ return d.toISOString().slice(0,10);
+}
+function visibleNames(monthly) {
+ const search = $('search').value.trim().toLowerCase();
+ const first = `${year}-01-01`, last = `${year}-12-31`;
+ const showExcluded = $('showExcluded').checked;
+ return employees.filter(e =>
+  e.name.toLowerCase().includes(search) &&
+  (e.active || attendance.some(a => a.employee === e.name && a.date >= first && a.date <= last)) &&
+  (showExcluded || !fullyExcludedForPeriod(e.name, monthly))
+ ).map(e => e.name);
 }
 function view(){year=Number($('year').value);month=Number($('month').value);const monthly=$('view').value==='month';
  const dates=monthly?Array.from({length:new Date(year,month+1,0).getDate()},(_,i)=>dateISO(year,month,i+1)):
  Array.from({length:12},(_,i)=>i);
- return {monthly,dates,names:visibleNames()};
+ return {monthly,dates,names:visibleNames(monthly)};
 }
 function within(name,date){return !excluded(name,date);}
 function statsFor(names,monthly){
