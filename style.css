@@ -12,3 +12,9 @@
 #forgotDialog input,#passwordDialog input,#adminPasswordDialog input,#adminPasswordDialog select{width:100%;}
 #forgotMessage,#passwordMessage,#adminPasswordMessage{min-height:1.2em;font-size:13px;}
 .header-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+
+/* Company logo in the top-right, both signed out and signed in */
+#login{display:none !important;}
+.header-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.company-logo{display:block;width:128px;max-width:28vw;height:auto;object-fit:contain;flex-shrink:0;}
+@media(max-width:600px){.company-logo{width:92px}.header-actions{gap:6px}}
