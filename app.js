@@ -11,11 +11,24 @@ let year=2026, month=9, saving=false;
 const statusByDate = new Map();
 function notify(message='',error=false){$('notice').textContent=message;$('notice').className=error?'error':'ok';if(error)console.error(message);}
 function authError(message=''){$('autherr').textContent=message;if(message)console.warn('Sign-in:',message);}
+function employeeFor(name){return employees.find(e=>e.name===name);}
+// An empty last_working_date means the employee is still employed.
+// Existing employees may have an unknown joining date until an admin enters it.
+function employedOn(name,date){
+ const employee=employeeFor(name);
+ return Boolean(employee && (!employee.joining_date || date>=employee.joining_date) &&
+   (!employee.last_working_date || date<=employee.last_working_date));
+}
+function employmentOverlaps(name,start,end){
+ const employee=employeeFor(name);
+ return Boolean(employee && (!employee.joining_date || employee.joining_date<=end) &&
+   (!employee.last_working_date || employee.last_working_date>=start));
+}
 function excluded(name,date){return exclusions.some(e=>e.employee===name&&e.start_date<=date&&(!e.end_date||date<=e.end_date));}
 function getStatus(name,date){return statusByDate.get(`${name}\u0000${date}`)||'';}
 function setStatus(name,date,status){const key=`${name}\u0000${date}`;if(status)statusByDate.set(key,status);else statusByDate.delete(key);}
 function signedOut(){session=null;isAdmin=false;employees=[];attendance=[];exclusions=[];statusByDate.clear();$('appcontent').hidden=true;$('loginrequired').hidden=false;$('login').hidden=false;$('logout').hidden=true;$('useremail').textContent='';}
-function signedIn(){ $('appcontent').hidden=false;$('loginrequired').hidden=true;$('login').hidden=true;$('logout').hidden=false;$('useremail').textContent=session.user.email||''; $('add').hidden=!isAdmin;$('manage').hidden=!isAdmin;$('mode').textContent=isAdmin?'Admin · Editing enabled':'Read-only view'; }
+function signedIn(){ $('appcontent').hidden=false;$('loginrequired').hidden=true;$('login').hidden=true;$('logout').hidden=false;$('useremail').textContent=session.user.email||''; $('add').hidden=!isAdmin;$('manage').hidden=!isAdmin;$('employment').hidden=!isAdmin;$('mode').textContent=isAdmin?'Admin · Editing enabled':'Read-only view'; }
 function setup(){
  for(let m=0;m<12;m++)$('month').add(new Option(monthLabel(m),m));$('month').value=month;
  for(let y=2024;y<=2035;y++)$('year').add(new Option(String(y),y));$('year').value=year;
@@ -27,6 +40,10 @@ function setup(){
  $('csv').onclick=()=>download(false);$('xlsx').onclick=()=>download(true);
  $('add').onclick=addEmployee;
  $('manage').onclick=openExclusions;
+ $('employment').onclick=openEmployment;
+ $('closeEmployment').onclick=()=>$('employmentDialog').close();
+ $('employmentForm').onsubmit=saveEmployment;
+ $('empEmployee').onchange=fillEmployment;
  $('showExcluded').onchange=render;
  $('closeExclusions').onclick=()=>$('exclusionDialog').close();
  $('exclusionForm').onsubmit=saveExclusion;
@@ -53,7 +70,7 @@ async function loadRemote(){
   session=data.session;if(!session){signedOut();return;}
   $('appcontent').hidden=true;
   const [er,ar,xr,rr]=await Promise.all([
-   db.from('employees').select('name,active').order('name'),
+   db.from('employees').select('name,active,joining_date,last_working_date').order('name'),
    db.from('attendance').select('employee,date,status'),
    db.from('employee_exclusions').select('id,employee,start_date,end_date,reason').order('start_date',{ascending:false}),
    db.rpc('is_admin')
@@ -93,11 +110,13 @@ function nextISO(date) {
 }
 function visibleNames(monthly) {
  const search = $('search').value.trim().toLowerCase();
- const first = `${year}-01-01`, last = `${year}-12-31`;
+ const first = monthly ? dateISO(year,month,1) : `${year}-01-01`;
+ const last = monthly ? dateISO(year,month,new Date(year,month+1,0).getDate()) : `${year}-12-31`;
  const showExcluded = $('showExcluded').checked;
  return employees.filter(e =>
   e.name.toLowerCase().includes(search) &&
   (e.active || attendance.some(a => a.employee === e.name && a.date >= first && a.date <= last)) &&
+  employmentOverlaps(e.name,first,last) &&
   (showExcluded || !fullyExcludedForPeriod(e.name, monthly))
  ).map(e => e.name);
 }
@@ -106,7 +125,7 @@ function view(){year=Number($('year').value);month=Number($('month').value);cons
  Array.from({length:12},(_,i)=>i);
  return {monthly,dates,names:visibleNames(monthly)};
 }
-function within(name,date){return !excluded(name,date);}
+function within(name,date){return employedOn(name,date)&&!excluded(name,date);}
 function statsFor(names,monthly){
  const start=monthly?`${year}-${String(month+1).padStart(2,'0')}-01`:`${year}-01-01`;
  const end=monthly?dateISO(year,month,new Date(year,month+1,0).getDate()):`${year}-12-31`;
@@ -124,6 +143,7 @@ function render(){
   let present=0,leave=0;
   const cells=dates.map(d=>{
    if(monthly){
+    if(!employedOn(name,d))return '<td class="excluded" title="Outside employment period">—</td>';
     if(excluded(name,d))return '<td class="excluded" title="Employee excluded for this date">—</td>';
     const status=getStatus(name,d);if(status==='P')present++;if(['L','EL'].includes(status))leave++;
     if(isAdmin){const options=CODES.map(c=>`<option value="${c}" ${c===status?'selected':''}>${c}</option>`).join('');
@@ -137,19 +157,20 @@ function render(){
   }).join('');
   const employee=employees.find(e=>e.name===name);
   html+=`<tr><td><b>${escapeHTML(name)}</b></td>${cells}<td>${present}</td><td>${leave}</td>`;
-  if(isAdmin)html+=`<td><button data-toggle="${escapeHTML(name)}">${employee.active?'Archive':'Restore'}</button> <button data-exclude="${escapeHTML(name)}">Exclude</button></td>`;
+  if(isAdmin)html+=`<td><button data-employment="${escapeHTML(name)}">Dates</button> <button data-toggle="${escapeHTML(name)}">${employee.active?'Archive':'Restore'}</button> <button data-exclude="${escapeHTML(name)}">Exclude</button></td>`;
   html+='</tr>';
  }
  $('table').innerHTML=html+'</tbody>';
- $('legend').innerHTML=CODES.map(c=>`<span><b class="pill ${c}">${c}</b> ${LABELS[c]}</span>`).join('')+'<span><b class="pill X">—</b> Excluded</span>';
+ $('legend').innerHTML=CODES.map(c=>`<span><b class="pill ${c}">${c}</b> ${LABELS[c]}</span>`).join('')+'<span><b class="pill X">—</b> Excluded / Not employed</span>';
  document.querySelectorAll('[data-name]').forEach(el=>el.onchange=()=>updateAttendance(el));
+ document.querySelectorAll('[data-employment]').forEach(el=>el.onclick=()=>openEmployment(el.dataset.employment));
  document.querySelectorAll('[data-toggle]').forEach(el=>el.onclick=()=>toggleEmployee(el.dataset.toggle));
  document.querySelectorAll('[data-exclude]').forEach(el=>el.onclick=()=>openExclusions(el.dataset.exclude));
 }
 async function updateAttendance(select){
  if(!isAdmin||saving)return;
  const {name,date}=select.dataset,status=select.value,old=select.dataset.original;
- if(excluded(name,date)){notify('Employee is excluded for that date.',true);select.value=old;return;}
+ if(!within(name,date)){notify('Date is outside employment period or excluded.',true);select.value=old;return;}
  saving=true;select.disabled=true;notify(`Saving ${name} on ${date}…`);
  try{
   const result=status?await db.from('attendance').upsert({employee:name,date,status},{onConflict:'employee,date'}):
@@ -164,7 +185,9 @@ async function updateAttendance(select){
 }
 async function addEmployee(){
  if(!isAdmin)return;const name=prompt('New employee full name:')?.trim();if(!name)return;
- const {error}=await db.from('employees').insert({name,active:true});
+ const joining_date=prompt('Joining date (YYYY-MM-DD), required for new employees:')?.trim();
+ if(!joining_date||!validISO(joining_date)){notify('Enter a valid joining date in YYYY-MM-DD format.',true);return;}
+ const {error}=await db.from('employees').insert({name,active:true,joining_date,last_working_date:null});
  if(error)notify('Employee not added: '+error.message,true);else{await loadRemote();notify('Employee added: '+name);}
 }
 async function toggleEmployee(name){
@@ -172,6 +195,43 @@ async function toggleEmployee(name){
  if(!confirm(`${e.active?'Archive':'Restore'} ${name}? Attendance history is retained.`))return;
  const {error}=await db.from('employees').update({active:!e.active}).eq('name',name);
  if(error)notify('Employee update failed: '+error.message,true);else{await loadRemote();notify(`${name} ${e.active?'archived':'restored'}.`);}
+}
+function validISO(value){
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
+ const d=new Date(value+'T12:00:00Z');return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===value;
+}
+function openEmployment(name){
+ if(!isAdmin)return;
+ $('empEmployee').innerHTML=employees.map(e=>`<option value="${escapeHTML(e.name)}">${escapeHTML(e.name)}</option>`).join('');
+ if(typeof name==='string')$('empEmployee').value=name;
+ $('empError').textContent='';fillEmployment();$('employmentDialog').showModal();
+}
+function fillEmployment(){
+ const e=employeeFor($('empEmployee').value);
+ $('empJoin').value=e?.joining_date||'';
+ $('empLeave').value=e?.last_working_date||'';
+ $('empError').textContent='';
+}
+async function saveEmployment(event){
+ event.preventDefault();if(!isAdmin)return;
+ const name=$('empEmployee').value,joining_date=$('empJoin').value||null;
+ const last_working_date=$('empLeave').value||null;
+ if(joining_date&&!validISO(joining_date)){ $('empError').textContent='Invalid joining date.';return;}
+ if(last_working_date&&!validISO(last_working_date)){ $('empError').textContent='Invalid last working date.';return;}
+ if(joining_date&&last_working_date&&last_working_date<joining_date){
+  $('empError').textContent='Last working date cannot precede joining date.';return;
+ }
+ const button=$('saveEmployment');button.disabled=true;$('empError').textContent='Saving…';
+ try{
+  const {data,error}=await db.from('employees')
+   .update({joining_date,last_working_date}).eq('name',name)
+   .select('name,joining_date,last_working_date').single();
+  if(error)throw error;
+  const e=employeeFor(name);Object.assign(e,data);
+  render();$('empError').textContent='Saved successfully.';
+  notify(`Employment dates saved for ${name}. Last working date: ${last_working_date||'Not specified (currently employed)'}.`);
+ }catch(error){$('empError').textContent='NOT SAVED: '+error.message;notify('Employment dates not saved: '+error.message,true);}
+ finally{button.disabled=false;}
 }
 function openExclusions(name){
  if(!isAdmin)return;
@@ -213,7 +273,7 @@ async function removeExclusion(id){
 function exportRows(){
  const {monthly,dates,names}=view(),rows=[];
  if(monthly){rows.push(['Employee',...dates.map(d=>d.slice(-2)),'Present','Leave']);
-  for(const name of names){const statuses=dates.map(d=>excluded(name,d)?'EX':getStatus(name,d));rows.push([name,...statuses,statuses.filter(x=>x==='P').length,statuses.filter(x=>['L','EL'].includes(x)).length]);}
+  for(const name of names){const statuses=dates.map(d=>!employedOn(name,d)?'NE':excluded(name,d)?'EX':getStatus(name,d));rows.push([name,...statuses,statuses.filter(x=>x==='P').length,statuses.filter(x=>['L','EL'].includes(x)).length]);}
  }else{rows.push(['Employee',...dates.map(m=>monthLabel(m,'short')+' P'),'Total Present','Total Leave']);
   for(const name of names){let p=0,l=0;const months=dates.map(m=>{const prefix=`${year}-${String(m+1).padStart(2,'0')}-`;const entries=attendance.filter(a=>a.employee===name&&a.date.startsWith(prefix)&&within(name,a.date));const count=entries.filter(a=>a.status==='P').length;p+=count;l+=entries.filter(a=>['L','EL'].includes(a.status)).length;return count;});rows.push([name,...months,p,l]);}
  }return rows;
