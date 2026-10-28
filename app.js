@@ -27,8 +27,8 @@ function employmentOverlaps(name,start,end){
 function excluded(name,date){return exclusions.some(e=>e.employee===name&&e.start_date<=date&&(!e.end_date||date<=e.end_date));}
 function getStatus(name,date){return statusByDate.get(`${name}\u0000${date}`)||'';}
 function setStatus(name,date,status){const key=`${name}\u0000${date}`;if(status)statusByDate.set(key,status);else statusByDate.delete(key);}
-function signedOut(){session=null;isAdmin=false;employees=[];attendance=[];exclusions=[];statusByDate.clear();$('appcontent').hidden=true;$('loginrequired').hidden=false;$('login').hidden=false;$('logout').hidden=true;$('useremail').textContent='';}
-function signedIn(){ $('appcontent').hidden=false;$('loginrequired').hidden=true;$('login').hidden=true;$('logout').hidden=false;$('useremail').textContent=session.user.email||''; $('add').hidden=!isAdmin;$('manage').hidden=!isAdmin;$('employment').hidden=!isAdmin;$('mode').textContent=isAdmin?'Admin · Editing enabled':'Read-only view'; }
+function signedOut(){session=null;isAdmin=false;employees=[];attendance=[];exclusions=[];statusByDate.clear();$('appcontent').hidden=true;$('loginrequired').hidden=false;$('login').hidden=false;$('logout').hidden=true;$('useremail').textContent='';$('changePassword').hidden=true;$('adminPasswords').hidden=true;}
+function signedIn(){ $('appcontent').hidden=false;$('loginrequired').hidden=true;$('login').hidden=true;$('logout').hidden=false;$('useremail').textContent=session.user.email||'';$('changePassword').hidden=false;$('adminPasswords').hidden=!isAdmin; $('add').hidden=!isAdmin;$('manage').hidden=!isAdmin;$('employment').hidden=!isAdmin;$('mode').textContent=isAdmin?'Admin · Editing enabled':'Read-only view'; }
 function setup(){
  for(let m=0;m<12;m++)$('month').add(new Option(monthLabel(m),m));$('month').value=month;
  for(let y=2024;y<=2035;y++)$('year').add(new Option(String(y),y));$('year').value=year;
@@ -47,6 +47,7 @@ function setup(){
  $('showExcluded').onchange=render;
  $('closeExclusions').onclick=()=>$('exclusionDialog').close();
  $('exclusionForm').onsubmit=saveExclusion;
+ setupPasswordControls();
  $('exType').onchange=()=>{ $('exDate').value=$('exType').value==='year'?`${year}-01-01`:dateISO(year,month,1);};
 }
 async function signIn(event){
@@ -285,12 +286,133 @@ function download(excel){
  const csv='\ufeff'+rows.map(row=>row.map(safe).join(',')).join('\r\n');
  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=file+'.csv';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),500);
 }
+
+// PASSWORD MANAGEMENT: only the Edge Function can perform privileged resets.
+let recoveryMode = false;
+function passwordMessage(id, message, error = false) {
+ const node = $(id); node.textContent = message;
+ node.style.color = error ? '#b73540' : '#18834c';
+}
+function setupPasswordControls() {
+ $('changePassword').onclick = () => openPasswordDialog(false);
+ $('adminPasswords').onclick = openAdminPasswordDialog;
+ $('openForgot').onclick = $('forgotFromLogin').onclick = openForgotDialog;
+ $('closeForgot').onclick = () => $('forgotDialog').close();
+ $('forgotForm').onsubmit = sendResetEmail;
+ $('closePassword').onclick = () => { if (!recoveryMode) $('passwordDialog').close(); };
+ $('passwordForm').onsubmit = updateOwnPassword;
+ $('closeAdminPasswords').onclick = () => $('adminPasswordDialog').close();
+ $('adminPasswordForm').onsubmit = resetOtherPassword;
+}
+function openForgotDialog() {
+ if ($('auth').open) $('auth').close();
+ $('forgotEmail').value = $('email').value.trim();
+ passwordMessage('forgotMessage', '');
+ $('forgotDialog').showModal();
+}
+async function sendResetEmail(event) {
+ event.preventDefault();
+ const button = $('sendReset'); button.disabled = true;
+ passwordMessage('forgotMessage', '');
+ try {
+  if (!db) throw Error('Supabase is not initialized.');
+  const redirectTo = location.origin + location.pathname;
+  const {error} = await db.auth.resetPasswordForEmail($('forgotEmail').value.trim(), {redirectTo});
+  if (error) throw error;
+  passwordMessage('forgotMessage', 'If this account exists, a reset email will arrive shortly. Check spam as well.');
+ } catch (error) {passwordMessage('forgotMessage', error.message, true);}
+ finally {button.disabled = false;}
+}
+function openPasswordDialog(recovery = false) {
+ recoveryMode = recovery;
+ $('passwordTitle').textContent = recovery ? 'Set a new password' : 'Change password';
+ $('passwordHelp').textContent = recovery ? 'Enter a new password to complete account recovery.' : 'Verify your current password, then choose a new password.';
+ $('currentPasswordLabel').hidden = recovery;
+ $('currentPassword').required = !recovery;
+ $('currentPassword').value = '';
+ $('newPassword').value = '';
+ $('confirmPassword').value = '';
+ $('closePassword').hidden = recovery;
+ passwordMessage('passwordMessage', '');
+ if (!$('passwordDialog').open) $('passwordDialog').showModal();
+}
+async function updateOwnPassword(event) {
+ event.preventDefault();
+ const button = $('savePassword'); button.disabled = true;
+ passwordMessage('passwordMessage', '');
+ try {
+  if (!db) throw Error('Supabase is not connected.');
+  const password = $('newPassword').value;
+  if (password.length < 12) throw Error('Use at least 12 characters.');
+  if (password !== $('confirmPassword').value) throw Error('New passwords do not match.');
+  if (!recoveryMode) {
+   const email = session?.user?.email;
+   if (!email) throw Error('Please sign in again.');
+   // Verify current password without replacing the existing browser session.
+   const verifier = supabase.createClient(window.APP_CONFIG.supabaseUrl, window.APP_CONFIG.supabaseAnonKey,
+    {auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+   const {error:verifyError} = await verifier.auth.signInWithPassword({email,password:$('currentPassword').value});
+   if (verifyError) throw Error('Current password is incorrect or reauthentication is required.');
+   await verifier.auth.signOut();
+  }
+  const {error} = await db.auth.updateUser({password});
+  if (error) throw error;
+  passwordMessage('passwordMessage', 'Password updated successfully.');
+  recoveryMode = false;
+  $('closePassword').hidden = false;
+  $('newPassword').value = $('confirmPassword').value = $('currentPassword').value = '';
+ } catch (error) {passwordMessage('passwordMessage', error.message, true);}
+ finally {button.disabled = false;}
+}
+async function openAdminPasswordDialog() {
+ if (!isAdmin) return;
+ passwordMessage('adminPasswordMessage', '');
+ $('passwordUser').innerHTML = '<option value="">Loading users…</option>';
+ $('adminPasswordDialog').showModal();
+ try {
+  const {data,error} = await db.functions.invoke('admin-passwords', {body:{action:'list'}});
+  if (error) throw error;
+  if (data?.error) throw Error(data.error);
+  $('passwordUser').innerHTML = '<option value="">Select user</option>' + data.users.map(user =>
+   `<option value="${escapeHTML(user.id)}">${escapeHTML(user.email || user.id)}</option>`).join('');
+ } catch (error) {passwordMessage('adminPasswordMessage', 'Could not load users: '+error.message, true);}
+}
+async function resetOtherPassword(event) {
+ event.preventDefault();
+ const button = $('adminSavePassword'); button.disabled = true;
+ passwordMessage('adminPasswordMessage', '');
+ try {
+  if (!isAdmin) throw Error('Administrator permission required.');
+  const userId = $('passwordUser').value;
+  const password = $('adminNewPassword').value;
+  if (!userId) throw Error('Select a user.');
+  if (password.length < 12) throw Error('Use at least 12 characters.');
+  if (password !== $('adminConfirmPassword').value) throw Error('Passwords do not match.');
+  if (!confirm('Reset the password for the selected user?')) return;
+  const {data,error} = await db.functions.invoke('admin-passwords',
+   {body:{action:'reset',userId,password}});
+  if (error) throw error;
+  if (data?.error) throw Error(data.error);
+  $('adminNewPassword').value = $('adminConfirmPassword').value = '';
+  passwordMessage('adminPasswordMessage', 'Password reset successfully. Tell the user securely.');
+ } catch (error) {passwordMessage('adminPasswordMessage', error.message, true);}
+ finally {button.disabled = false;}
+}
+function registerPasswordRecoveryListener() {
+ db.auth.onAuthStateChange((event) => {
+  if (event === 'PASSWORD_RECOVERY') {
+   // Delay UI work until the Supabase callback completes.
+   setTimeout(() => openPasswordDialog(true), 0);
+  }
+ });
+}
 async function start(){
  try{
   setup();signedOut();$('exEmployee').onchange=showExclusionList;
   if(!window.APP_CONFIG?.supabaseUrl||!window.APP_CONFIG?.supabaseAnonKey){$('loginnotice').textContent='Supabase config.js is missing or invalid.';return;}
   if(!window.supabase?.createClient){$('loginnotice').textContent='Supabase JavaScript library failed to load. Check browser Console.';return;}
   db=window.supabase.createClient(window.APP_CONFIG.supabaseUrl,window.APP_CONFIG.supabaseAnonKey);
+  registerPasswordRecoveryListener();
   await loadRemote();
  }catch(e){console.error('Startup failure',e);$('loginnotice').textContent='Startup error: '+e.message;}
 }
