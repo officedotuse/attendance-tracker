@@ -64,6 +64,25 @@ async function signIn(event){
  finally{button.disabled=false;button.textContent='Sign in';}
 }
 async function signOut(){try{const {error}=await db.auth.signOut();if(error)throw error;signedOut();notify();}catch(e){notify('Sign-out failed: '+e.message,true);}}
+// Supabase REST responses are capped (commonly at 1,000 rows). Fetch all
+// attendance records in deterministic pages so older dates are not lost on reload.
+async function fetchAllAttendance(){
+ const pageSize=500;
+ const rows=[];
+ for(let offset=0;;offset+=pageSize){
+  const {data,error}=await db.from('attendance')
+   .select('employee,date,status')
+   .order('date',{ascending:true})
+   .order('employee',{ascending:true})
+   .range(offset,offset+pageSize-1);
+  if(error)throw error;
+  const page=data||[];
+  rows.push(...page);
+  if(page.length<pageSize)break;
+ }
+ console.info(`Attendance Tracker: loaded ${rows.length} attendance records.`);
+ return rows;
+}
 async function loadRemote(){
  notify();
  try{
@@ -72,12 +91,12 @@ async function loadRemote(){
   $('appcontent').hidden=true;
   const [er,ar,xr,rr]=await Promise.all([
    db.from('employees').select('name,active,joining_date,last_working_date').order('name'),
-   db.from('attendance').select('employee,date,status'),
+   fetchAllAttendance(),
    db.from('employee_exclusions').select('id,employee,start_date,end_date,reason').order('start_date',{ascending:false}),
    db.rpc('is_admin')
   ]);
-  for(const r of [er,ar,xr,rr])if(r.error)throw r.error;
-  employees=er.data||[];attendance=ar.data||[];exclusions=xr.data||[];isAdmin=rr.data===true;
+  for(const r of [er,xr,rr])if(r.error)throw r.error;
+  employees=er.data||[];attendance=ar;exclusions=xr.data||[];isAdmin=rr.data===true;
   statusByDate.clear();for(const entry of attendance)setStatus(entry.employee,entry.date,entry.status);
   signedIn();render();
  }catch(e){$('appcontent').hidden=true;notify('Database loading failed: '+e.message+'. Check schema.sql, RLS policies and browser Console.',true);$('loginrequired').hidden=false;$('loginnotice').textContent='Signed in, but the database could not load. '+e.message;}
