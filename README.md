@@ -1,10 +1,47 @@
-# Attendance Tracker
+<div align="center">
+
+# 📅 Attendance Tracker
+
+**A flexible, team-based attendance management system**
+
+![HTML](https://img.shields.io/badge/HTML-5-E34F26?logo=html5&logoColor=white)
+![CSS](https://img.shields.io/badge/CSS-3-1572B6?logo=css3&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-Vanilla-F7DF1E?logo=javascript&logoColor=black)
+![Supabase](https://img.shields.io/badge/Backend-Supabase-3FCF8E?logo=supabase&logoColor=white)
+![Hosting](https://img.shields.io/badge/Hosting-Static_Site-555555)
+
+[Explore features](#-features) · [Set up locally](#-local-setup) · [Test permissions](#-suggested-testing-checklist) · [Troubleshooting](#-troubleshooting)
+
+</div>
+
+---
 
 A responsive, browser-based attendance management system for organizations with multiple teams. It combines monthly and yearly attendance views, team-based access control, employee management, reporting, and secure account administration.
 
 Built with **HTML, CSS, JavaScript, and Supabase**. The frontend can run locally or be published as a static website.
 
-## Features
+## 🧭 Table of contents
+
+- [✨ Features](#-features)
+  - [Attendance dashboard](#attendance-dashboard)
+  - [Employee management](#employee-management)
+  - [Team management](#team-management)
+  - [User and role management](#user-and-role-management)
+- [🔐 Access control](#-access-control)
+- [🧰 Technology stack](#-technology-stack)
+- [📁 Project structure](#-project-structure)
+- [🚀 Local setup](#-local-setup)
+- [✅ Suggested testing checklist](#-suggested-testing-checklist)
+- [🌐 Deployment](#-deployment)
+- [🛡️ Security notes](#-security-notes)
+- [🧯 Troubleshooting](#-troubleshooting)
+- [🎨 Customization](#-customization)
+- [🤝 Contributing](#-contributing)
+- [📜 License](#-license)
+
+---
+
+## ✨ Features
 
 ### Attendance dashboard
 - View attendance by **month** or **year**.
@@ -33,7 +70,7 @@ Built with **HTML, CSS, JavaScript, and Supabase**. The frontend can run locally
 - Edit account email addresses, reset passwords, and mark accounts active or inactive.
 - Show only authorized actions to each signed-in user.
 
-## Access control
+## 🔐 Access control
 
 | Role | Typical permissions |
 | --- | --- |
@@ -45,7 +82,7 @@ Built with **HTML, CSS, JavaScript, and Supabase**. The frontend can run locally
 
 Authorization must be enforced **in Supabase**, using Row Level Security (RLS) and appropriately secured database functions—not only by hiding frontend controls.
 
-## Technology stack
+## 🧰 Technology stack
 
 | Layer | Technology |
 | --- | --- |
@@ -56,7 +93,7 @@ Authorization must be enforced **in Supabase**, using Row Level Security (RLS) a
 | Privileged account operations | Supabase Edge Functions |
 | Hosting | Static hosting such as GitHub Pages |
 
-## Project structure
+## 📁 Project structure
 
 A typical project layout is:
 
@@ -78,7 +115,11 @@ attendance-tracker/
 
 The exact migration filenames may vary by release. Apply them in the order documented with your version of the project.
 
-## Local setup
+## 🚀 Local setup
+
+> [!TIP]
+> **First time here?** Follow the six steps below in order, using a separate test Supabase project. The expandable tips provide extra context without cluttering the main instructions.
+
 
 ### 1. Create a Supabase test project
 
@@ -111,6 +152,20 @@ The function name must match the name used by the frontend. Configure required s
 
 ### 5. Start the local website
 
+<details>
+<summary><strong>🪟 Windows quick start (PowerShell)</strong></summary>
+
+Open PowerShell in the project directory and run:
+
+```powershell
+py -m http.server 5500
+```
+
+Then visit `http://localhost:5500/`.
+
+</details>
+
+
 From the project folder, run:
 
 ```bash
@@ -125,7 +180,7 @@ Configure the local URL in **Supabase Authentication → URL Configuration** whe
 
 Test with separate administrator, team leader, HR viewer, and standard user accounts. Confirm both that unauthorized editing controls are hidden **and** that unauthorized database requests are rejected.
 
-## Suggested testing checklist
+## ✅ Suggested testing checklist
 
 - [ ] Sign in and sign out with test accounts.
 - [ ] Confirm monthly and yearly attendance views.
@@ -140,7 +195,7 @@ Test with separate administrator, team leader, HR viewer, and standard user acco
 - [ ] Verify CSV and Excel exports.
 - [ ] Test responsive layouts and keyboard navigation.
 
-## Deployment
+## 🌐 Deployment
 
 1. Complete all tests against a separate Supabase environment.
 2. Back up the production database.
@@ -152,7 +207,7 @@ Test with separate administrator, team leader, HR viewer, and standard user acco
 
 > The frontend and Supabase project are configured separately. Running the website locally does **not** isolate it from production if `config.js` still points to the production project.
 
-## Security notes
+## 🛡️ Security notes
 
 - Use Supabase Auth for identity and RLS for database access.
 - Validate administrative permissions on the server for account creation, invitations, email changes, and password resets.
@@ -161,7 +216,19 @@ Test with separate administrator, team leader, HR viewer, and standard user acco
 - Treat password recovery links and initial credentials as sensitive.
 - Review whether disabling a user also prevents access from existing sessions; frontend-only restrictions are insufficient.
 
-## Troubleshooting
+## 🧯 Troubleshooting
+
+<details>
+<summary><strong>🔍 Debugging workflow: where to look first</strong></summary>
+
+1. Open your browser's Developer Tools (`F12`) and check **Console**.
+2. Open **Network**, reproduce the issue, and inspect the failing request.
+3. Confirm `config.js` points to the intended Supabase project.
+4. For account operations, check **Supabase → Edge Functions → Logs**.
+5. For database operations, check table permissions, RLS policies, and RPC errors.
+
+</details>
+
 
 **Teams appear in dropdowns but not in the directory:** Check the teams query, RLS read policies, and browser console errors.
 
@@ -171,14 +238,24 @@ Test with separate administrator, team leader, HR viewer, and standard user acco
 
 **Invitations or password recovery emails do not arrive:** Check Supabase Auth URL configuration, email provider settings, and delivery logs.
 
-## Customization
+## 🎨 Customization
 
 Adapt the team names, attendance status codes, organization branding, role policies, and reporting options to your environment. Review database policies whenever introducing a new role or permission.
 
-## Contributing
+## 🤝 Contributing
 
 Contributions and suggestions are welcome. For significant changes, open an issue describing the use case and expected behavior. Test database migrations and authorization changes in an isolated environment before proposing deployment.
 
-## License
+## 📜 License
 
 No license is specified in this README. Add a `LICENSE` file if you intend to grant others permission to reuse, modify, or distribute the project.
+
+---
+
+<div align="center">
+
+**Build · Test · Secure · Deploy**
+
+[⬆ Back to top](#-attendance-tracker)
+
+</div>
